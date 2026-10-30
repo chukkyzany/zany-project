@@ -2,7 +2,7 @@
 
 A small e-commerce web app (products, cart, guest checkout) deployed on AWS using a classic 3-tier architecture. The app server and the database sit in **private subnets**, and the only public entry point is an **Application Load Balancer**. Everything was built by hand in the AWS Console.
 
-![Store homepage](screenshots/01-store-homepage.png)
+![Product Page](screenshot/02-product-page.png)
 
 ## Architecture
 
@@ -29,7 +29,7 @@ RDS MySQL (private subnets, not publicly accessible)
 | Admin access | AWS Systems Manager Session Manager | Shell access with no open SSH port |
 | Database | RDS MySQL | Private subnets, public access disabled |
 
-![VPC resource map](/screenshots/07-resource-map.png)
+![VPC resource map](screenshots/07-resource-map.png)
 
 ## Security design
 
@@ -48,8 +48,8 @@ Other choices:
 - **Credentials outside the web root.** The database login is stored in `/var/www/private/config.php`, readable only by root and the web server group, and is never committed to this repository.
 - **Safe database access in code.** All queries use PDO prepared statements, and output is HTML-escaped.
 
-![Security groups](/screenshots/05-security-group.png)
-![RDS not publicly accessible](/screenshots/ 04-rds-database.png)
+![Security groups](screenshots/05-security-group.png)
+![RDS Database](screenshot/04-rds-database.png)
 
 ## The app
 
@@ -61,7 +61,10 @@ Other choices:
 
 Database tables: `products`, `orders`, `order_items`.
 
-![Order confirmation](/screenshots/03-orders.png)
+![Orders](screenshot/03-orders.png)
+
+![Store Homepage](screenshot/01-store-homepage.png)
+
 
 ## How it was built
 
@@ -75,7 +78,7 @@ Database tables: `products`, `orders`, `order_items`.
 8. **Load balancer:** created the target group (health check `/health.html`), registered the EC2, and created the ALB with an HTTP listener forwarding to it.
 9. **Testing:** browsed the store through the ALB address and completed a full order from cart to confirmation.
 
-![Target group healthy](/screenshots/06-target-group.png)
+![Target group healthy](screenshots/06-target-group.png)
 
 ## Troubleshooting notes
 
@@ -89,7 +92,7 @@ Database tables: `products`, `orders`, `order_items`.
 |---|---|
 | `userdata.sh` | EC2 user data: installs Apache, PHP and the MySQL client |
 | `deploy-app.sh` | Creates the PHP application on the server and connects it to RDS |
-| `docs/screenshots/` | Console screenshots referenced in this README |
+| `/screenshots` | Console screenshots referenced in this README |
 
 ## Cost and cleanup
 
@@ -106,3 +109,4 @@ The NAT gateway, the load balancer and the RDS instance all cost money while the
 ## What I learned
 
 How to design a multi-tier network with public and private subnets, chain security groups for least-privilege access, reach private instances without SSH, connect to RDS securely, and debug problems across the network, server and application layers.
+
