@@ -1,112 +1,132 @@
-# zany-project: 3-Tier E-Commerce App on AWS
+# zany-project: A 3-Tier E-Commerce App on AWS
 
-A small e-commerce web app (products, cart, guest checkout) deployed on AWS using a classic 3-tier architecture. The app server and the database sit in **private subnets**, and the only public entry point is an **Application Load Balancer**. Everything was built by hand in the AWS Console.
+I built this small online store to practise real AWS infrastructure, not just follow tutorials. You can browse products, add them to a cart and place an order. The part I cared about most was how it's set up behind the scenes: the app server and the database are both hidden in private subnets, and the only thing the internet can reach is a load balancer.
 
-![Product Page](screenshot/02-product-page.png)
+I built everything by hand in the AWS Console.
 
-## Architecture
+![product homepage](screenshot/02-product-page.png)
+
+## How it fits together
+
+A visitor's request travels like this:
 
 ```
 Internet
    |
    v
-Application Load Balancer (public subnets, 2 AZs)
-   |  HTTP :80
+Application Load Balancer (public subnets, two Availability Zones)
+   |  HTTP on port 80
    v
-EC2 - Ubuntu 24.04, Apache + PHP (private subnet)
-   |  MySQL :3306 (SSL, verified)
+EC2 server running Ubuntu, Apache and PHP (private subnet)
+   |  MySQL on port 3306, over verified SSL
    v
-RDS MySQL (private subnets, not publicly accessible)
+RDS MySQL database (private subnets, not publicly accessible)
 ```
 
-| Layer | Service | Notes |
-|---|---|---|
-| Network | VPC `10.0.0.0/16` | 2 public + 2 private subnets across 2 Availability Zones |
-| Outbound access | NAT Gateway | Lets the private EC2 install packages |
-| AWS service access | S3 Gateway endpoint | Free, private route to S3 from the private subnets |
-| Entry point | Application Load Balancer | Internet-facing, health check on `/health.html` |
-| App server | EC2 (Ubuntu Server 24.04 LTS) | Private subnet, no public IP, no SSH key pair |
-| Admin access | AWS Systems Manager Session Manager | Shell access with no open SSH port |
-| Database | RDS MySQL | Private subnets, public access disabled |
+- **VPC (10.0.0.0/16):** my own private network, with two public and two private subnets spread across two Availability Zones.
+- **Application Load Balancer:** the only public entry point. It checks that the server is healthy and passes traffic to it.
+- **EC2 (Ubuntu Server 24.04):** runs the store. It sits in a private subnet with no public IP address.
+- **RDS MySQL:** stores the products and orders. It's in private subnets and can't be reached from the internet.
+- **NAT gateway:** lets the private server go out to the internet to install software, without letting anything in.
+- **S3 gateway endpoint:** a free, private route from the private subnets to S3.
+- **Session Manager:** how I log in to the server. There's no SSH key and no open SSH port.
 
-![VPC resource map](screenshots/07-resource-map.png)
+## How I built it, step by step
 
-## Security design
+### Step 1: The network
 
-Security groups are chained so each layer only accepts traffic from the layer in front of it:
+I created the VPC with two public and two private subnets across two Availability Zones, an internet gateway, and a NAT gateway. I used two route tables: the public one sends outbound traffic to the internet gateway, and the private one sends it to the NAT gateway, so the private server can install software without being reachable from the internet. I also added a free S3 gateway endpoint to the private route tables.
 
-| Security group | Inbound rule |
-|---|---|
-| `eshop-alb-sg` | HTTP 80 from the internet |
-| `eshop-app-sg` | HTTP 80 from `eshop-alb-sg` only |
-| `eshop-db-sg` | MySQL 3306 from `eshop-app-sg` only |
+![VPC resource map](screenshot/07-resource-map.png)
 
-Other choices:
-- **No SSH.** The EC2 has no key pair and no public IP. Access is through Session Manager using an IAM role with `AmazonSSMManagedInstanceCore`.
-- **Database not public.** RDS is only reachable from the app server.
-- **Encrypted, verified connection.** The app connects to RDS over SSL and verifies the server certificate using the AWS RDS CA bundle.
-- **Credentials outside the web root.** The database login is stored in `/var/www/private/config.php`, readable only by root and the web server group, and is never committed to this repository.
-- **Safe database access in code.** All queries use PDO prepared statements, and output is HTML-escaped.
+### Step 2: Security groups
 
-![Security groups](screenshots/05-security-group.png)
-![RDS Database](screenshot/04-rds-database.png)
+I wanted every layer to only talk to the layer right in front of it, so I chained three security groups:
 
-## The app
+- **Load balancer group (`eshop-alb-sg`):** accepts web traffic (port 80) from anywhere.
+- **App server group (`eshop-app-sg`):** accepts web traffic only from the load balancer.
+- **Database group (`eshop-db-sg`):** accepts MySQL traffic (port 3306) only from the app server.
 
-- **Products page:** lists products from the database with an add-to-cart button
-- **Cart:** session-based, with quantity updates and item removal
-- **Guest checkout:** name and email, no accounts
-- **Orders:** saved to RDS in a single transaction that also checks and reduces stock
-- **Confirmation page:** shows the order number and total
+![Security groups](screenshot/05-security-group.png)
 
-Database tables: `products`, `orders`, `order_items`.
+### Step 3: The database (RDS MySQL)
 
-![Orders](screenshot/03-orders.png)
+I made a DB subnet group from the two private subnets, then created the MySQL database with public access turned off and the database security group attached. It can only be reached from the app server.
 
-![Store Homepage](screenshot/01-store-homepage.png)
+![RDS connectivity and security](screenshot/04-rds-database.png)
+
+### Step 4: The app server (EC2)
+
+I launched an Ubuntu Server 24.04 instance in a private subnet, with no public IP, no key pair, and an IAM role for Session Manager. Its startup script, [`userdata.sh`](userdata.sh), installs Apache, PHP and the MySQL client and adds a simple health check page. Once it passed its status checks, I connected through Session Manager and confirmed Apache was running and the health page returned `OK`.
+
+### Step 5: Connecting to the database
+
+From the server, I logged in to the database over verified SSL, then created the `products`, `orders` and `order_items` tables and added some sample products.
+
+### Step 6: Deploying the store
+
+I ran [`deploy-app.sh`](deploy-app.sh) on the server. It asks for the database details and creates the PHP store. A quick test from the server showed the products coming back from the database.
+
+### Step 7: Target group and load balancer
+
+I created a target group with a health check on `/health.html` and registered the server. Then I created the internet-facing load balancer in the two public subnets, forwarding HTTP on port 80 to the target group. The server showed as healthy.
+
+![Target group healthy](screenshot/06-target-group.png)
+
+### Step 8: Testing the whole store
+
+I opened the load balancer's address in my browser. The page loaded from the private server, which you can see in the "Served by" line at the bottom of the page. I added items to the cart, checked out as a guest, and the order went through. I then checked the database to make sure the order was saved and the stock went down.
+
+![Order confirmation](screenshot/01-store-homepage.png)
 
 
-## How it was built
+![data confirmation](screenshot/03-orders.png)
 
-1. **VPC and subnets:** created the VPC, two public and two private subnets across two AZs, an internet gateway, a NAT gateway, and separate public and private route tables.
-2. **S3 gateway endpoint:** attached to the private route tables.
-3. **Security groups:** created the three chained groups above.
-4. **RDS MySQL:** created a DB subnet group from the two private subnets, then the database with public access off and `eshop-db-sg` attached.
-5. **EC2:** launched Ubuntu Server 24.04 in a private subnet with the SSM role and no key pair. [`userdata.sh`](userdata.sh) installs Apache, PHP and the MySQL client and adds a health check page.
-6. **Database tables:** connected from the EC2 through Session Manager and created the schema and sample products.
-7. **App deployment:** [`deploy-app.sh`](deploy-app.sh) asks for the database endpoint and login, then creates the PHP app on the server.
-8. **Load balancer:** created the target group (health check `/health.html`), registered the EC2, and created the ALB with an HTTP listener forwarding to it.
-9. **Testing:** browsed the store through the ALB address and completed a full order from cart to confirmation.
+## How I locked it down
 
-![Target group healthy](screenshots/06-target-group.png)
+- The server has no public IP and no key pair. I get a shell through Session Manager with an IAM role.
+- The database has public access switched off.
+- The security groups are chained, so each layer only accepts traffic from the layer in front of it.
+- The app connects to the database over SSL and checks the server's certificate against the AWS RDS certificate bundle.
+- The database password lives in a private folder outside the web root. It isn't in this repository and it isn't in the website files.
+- The PHP code uses prepared statements for every query and escapes everything it prints.
 
-## Troubleshooting notes
+## What the store does
 
-- **Permission denied downloading the RDS certificate:** Session Manager starts in a folder the user can't write to. Downloading to `/tmp` fixed it.
-- **`SSL_CTX_set_default_verify_paths failed`:** caused by the missing certificate file above. Once the file was in place, verified SSL worked.
-- **Private instance needs internet for `apt`:** solved with the NAT gateway and a private route table pointing `0.0.0.0/0` to it.
+- Shows a product list from the database
+- Lets you add items to a cart, change quantities and remove items
+- Offers guest checkout with just a name and email, so there are no accounts to manage
+- Saves each order to the database in one transaction, which also checks and reduces the stock
+- Shows a confirmation page with your order number and total
 
-## Repository contents
+## Things that went wrong (and how I fixed them)
 
-| File | Purpose |
-|---|---|
-| `userdata.sh` | EC2 user data: installs Apache, PHP and the MySQL client |
-| `deploy-app.sh` | Creates the PHP application on the server and connects it to RDS |
-| `/screenshots` | Console screenshots referenced in this README |
+**"Permission denied" when downloading the RDS certificate.** Session Manager starts you in a folder you can't write to, so the download failed. Downloading into `/tmp` solved it.
 
-## Cost and cleanup
+**`SSL_CTX_set_default_verify_paths failed`.** This error was caused by the missing certificate file from the problem above, not by the network or the database. Once the file was in place, the verified SSL connection worked.
 
-The NAT gateway, the load balancer and the RDS instance all cost money while they run. After taking screenshots, delete them to avoid charges: ALB and target group, NAT gateway (and release its Elastic IP), RDS database, EC2 instance, and finally the VPC.
+**The private server couldn't install anything.** A server with no public IP can't reach the internet by itself. I fixed it with a NAT gateway and a private route table that sends outbound traffic to it.
 
-## Possible improvements
+**Nano couldn't save the deploy script.** Same cause as the first problem: I was in a folder I couldn't write to. Working inside `/tmp` fixed it.
 
-- Add a second EC2 in the other AZ for high availability
-- Add HTTPS to the load balancer with an ACM certificate
-- Rebuild the infrastructure with Terraform
-- Store the database password in AWS Secrets Manager
+## What's in this repo
+
+- `userdata.sh`: the startup script for the EC2 server
+- `deploy-app.sh`: creates the PHP store on the server and connects it to the database
+- `screenshot/`: the console screenshots used above
+
+## A note on cost
+
+The NAT gateway, the load balancer and the database all cost money while they're running. Once I'd finished testing and taking screenshots, I deleted them: the load balancer and target group, the NAT gateway (and its Elastic IP), the database, the server, and then the VPC. That's why the store is no longer live.
+
+## What I'd do next
+
+- Run a second server in the other Availability Zone so the store survives a zone failure
+- Add HTTPS to the load balancer with a certificate from ACM
+- Rebuild the whole thing with Terraform
+- Move the database password into AWS Secrets Manager
 - Add user accounts and a real payment flow
 
-## What I learned
+## What I took away from this
 
-How to design a multi-tier network with public and private subnets, chain security groups for least-privilege access, reach private instances without SSH, connect to RDS securely, and debug problems across the network, server and application layers.
-
+Building this taught me how public and private subnets fit together, why chaining security groups gives each layer only the access it needs, and how to reach a private server without opening SSH. It also taught me that most errors that look scary are caused by something small further back, like a file that never downloaded.
