@@ -1,8 +1,28 @@
-# zany-project: A 3-Tier E-Commerce App on AWS
+# zany-project: A Secure 3-Tier E-Commerce Platform on AWS
 
-I built this small online store to practise real AWS infrastructure, not just follow tutorials. You can browse products, add them to a cart and place an order. The part I cared about most was how it's set up behind the scenes: the app server and the database are both hidden in private subnets, and the only thing the internet can reach is a load balancer.
+> A practice project built around a simulated business scenario, and built by hand in the AWS Console.
 
-I built everything by hand in the AWS Console.
+## The business problem
+
+A small online retailer selling everyday accessories (earbuds, phone stands, chargers) has outgrown taking orders by chat. They need a proper online store, but they have three worries:
+
+- **Customer data must be protected.** Orders and customer details can't be exposed to the internet.
+- **The store has to stay reachable.** Customers shouldn't hit a dead page when traffic grows or one data centre has a problem.
+- **They have no dedicated IT team.** Server access has to be secure and simple to manage, with no open admin ports to defend.
+
+## The solution
+
+I designed and built a 3-tier store on AWS that addresses each worry:
+
+- **Protected data:** the database sits in private subnets with no public access, and the app connects to it over verified SSL. The only thing the internet can reach is the load balancer.
+- **Built to grow:** the network spans two Availability Zones behind an Application Load Balancer, so adding a second server is a small step, not a redesign.
+- **Safe, simple administration:** the server has no public IP and no SSH key. Admins connect through AWS Session Manager, so there's no open port to defend.
+
+## What it delivers
+
+- Customers can browse products, build a cart and check out as guests
+- Every order is saved to the database in a single transaction that also updates stock
+- Each layer only accepts traffic from the layer in front of it, using chained security groups
 
 ![product homepage](screenshot/02-product-page.png)
 
@@ -78,7 +98,6 @@ I created a target group with a health check on `/health.html` and registered th
 I opened the load balancer's address in my browser. The page loaded from the private server, which you can see in the "Served by" line at the bottom of the page. I added items to the cart, checked out as a guest, and the order went through. I then checked the database to make sure the order was saved and the stock went down.
 
 ![Order confirmation](screenshot/01-store-homepage.png)
-
 
 ![data confirmation](screenshot/03-orders.png)
 
